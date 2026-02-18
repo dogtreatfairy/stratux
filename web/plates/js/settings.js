@@ -380,6 +380,109 @@ function SettingsCtrl($rootScope, $scope, $state, $location, $window, $http) {
 
 	getSettings();
 
+	// ==================== SDR Management ====================
+
+	$scope.sdrDevices = [];
+	$scope.sdrActiveProfile = '';
+	$scope.sdrStackState = 'running';
+	$scope.customAssignments = {};
+
+	// Fetch SDR dongle inventory from backend
+	$scope.refreshSdrState = function() {
+		$http.get(URL_SDR_STATE_GET).then(function(response) {
+			var data = response.data;
+			$scope.sdrDevices = data.devices || [];
+			$scope.sdrActiveProfile = data.activeProfile || '';
+			$scope.sdrStackState = data.stackState || 'running';
+
+			// Initialize custom role from current assignment for Custom profile editing
+			for (var i = 0; i < $scope.sdrDevices.length; i++) {
+				$scope.sdrDevices[i].customRole = $scope.sdrDevices[i].role || 'disabled';
+			}
+
+			// If Custom profile is active, load saved custom assignments
+			if ($scope.sdrActiveProfile === 'Custom') {
+				$http.get(URL_REGION_PROFILES_GET).then(function(resp) {
+					var profiles = resp.data;
+					if (profiles.profiles && profiles.profiles.Custom) {
+						var custom = profiles.profiles.Custom;
+						$scope.customAssignments = custom.assignments || {};
+						// Apply saved assignments to device dropdowns
+						for (var j = 0; j < $scope.sdrDevices.length; j++) {
+							var serial = $scope.sdrDevices[j].serial;
+							if ($scope.customAssignments[serial]) {
+								$scope.sdrDevices[j].customRole = $scope.customAssignments[serial];
+							}
+						}
+					}
+				});
+			}
+		}, function(response) {
+			// Error fetching SDR state
+		});
+	};
+
+	// Load SDR state on page load
+	$scope.refreshSdrState();
+
+	// Switch region profile (US, EU, Custom)
+	$scope.setSdrProfile = function(profile) {
+		if (profile === $scope.sdrActiveProfile) return;
+
+		var payload = { profile: profile };
+
+		// If switching to Custom, include current custom assignments
+		if (profile === 'Custom') {
+			payload.assignments = $scope.customAssignments;
+		}
+
+		$http.post(URL_REGION_PROFILE_SET, payload).then(function(response) {
+			$scope.sdrActiveProfile = profile;
+			// Refresh full state after profile switch
+			$scope.refreshSdrState();
+			// Also refresh main settings since protocol enables change
+			getSettings();
+		}, function(response) {
+			alert('Failed to switch profile: ' + (response.data || 'unknown error'));
+		});
+	};
+
+	// Update a custom assignment when user changes dropdown
+	$scope.updateCustomAssignment = function(sdr) {
+		$scope.customAssignments[sdr.serial] = sdr.customRole;
+	};
+
+	// Apply custom profile with current assignments
+	$scope.applyCustomProfile = function() {
+		// Validate: check for duplicate roles (except disabled)
+		var roleCounts = {};
+		for (var serial in $scope.customAssignments) {
+			var role = $scope.customAssignments[serial];
+			if (role && role !== 'disabled') {
+				if (roleCounts[role]) {
+					alert('Duplicate protocol assignment: ' + role + ' is assigned to multiple dongles.');
+					return;
+				}
+				roleCounts[role] = true;
+			}
+		}
+
+		var payload = {
+			profile: 'Custom',
+			assignments: $scope.customAssignments
+		};
+
+		$http.post(URL_REGION_PROFILE_SET, payload).then(function(response) {
+			$scope.sdrActiveProfile = 'Custom';
+			$scope.refreshSdrState();
+			getSettings();
+		}, function(response) {
+			alert('Failed to apply custom profile: ' + (response.data || 'unknown error'));
+		});
+	};
+
+	// ==================== End SDR Management ====================
+
 	// Reset all settings from a button on the page
 	$scope.resetSettings = function () {
 		getSettings();

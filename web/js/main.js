@@ -29,6 +29,11 @@ var URL_GET_TILESETS        = URL_HOST_PROTOCOL + URL_HOST_BASE + "/tiles/tilese
 var URL_GET_TILE            = URL_HOST_PROTOCOL + URL_HOST_BASE + "/tiles";
 var URL_GET_STYLE           = URL_HOST_PROTOCOL + URL_HOST_BASE + "/mapdata/styles"
 
+// SDR Management API endpoints
+var URL_SDR_STATE_GET       = URL_HOST_PROTOCOL + URL_HOST_BASE + "/getSdrState";
+var URL_REGION_PROFILES_GET = URL_HOST_PROTOCOL + URL_HOST_BASE + "/getRegionProfiles";
+var URL_REGION_PROFILE_SET  = URL_HOST_PROTOCOL + URL_HOST_BASE + "/setRegionProfile";
+
 
 var URL_DEVELOPER_WS        = "ws://" + URL_HOST_BASE + "/developer";
 var URL_GPS_WS              = "ws://" + URL_HOST_BASE + "/situation";
@@ -36,6 +41,7 @@ var URL_STATUS_WS           = "ws://" + URL_HOST_BASE + "/status";
 var URL_TRAFFIC_WS          = "ws://" + URL_HOST_BASE + "/traffic";
 var URL_WEATHER_WS          = "ws://" + URL_HOST_BASE + "/weather";
 var URL_RADAR_WS            = "ws://" + URL_HOST_BASE + "/radar";
+var URL_TERMINAL_WS         = "ws://" + URL_HOST_BASE + "/terminal";
 
 // define the module with dependency on mobile-angular-ui
 //var app = angular.module('stratux', ['ngRoute', 'mobile-angular-ui', 'mobile-angular-ui.gestures', 'appControllers']);
@@ -106,6 +112,12 @@ app.config(function ($stateProvider, $urlRouterProvider) {
 			url: '/developer',
 			templateUrl: 'plates/developer.html',
 			controller: 'DeveloperCtrl',
+			reloadOnSearch: false
+		})
+		.state('terminal', {
+			url: '/terminal',
+			templateUrl: 'plates/terminal.html',
+			controller: 'TerminalCtrl',
 			reloadOnSearch: false
 		});
 	$urlRouterProvider.otherwise('/');

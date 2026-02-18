@@ -3,6 +3,15 @@
 
 # Stratux &#9992;
 
+## Fork updates (v3.6.1)
+
+This fork includes recent SDR and UI enhancements focused on day-to-day operations:
+
+* SDR tuning and profile selection in Settings (US / EU / Custom)
+* SDR calibration workflow updates (including GSM-related calibration flow updates)
+* Built-in web terminal page (Developer Mode) from the left menu for shell access
+* Supporting backend APIs for SDR inventory/profile management and terminal sessions
+
 ```mermaid
 mindmap
   root((Raspberry PI))

@@ -1,0 +1,38 @@
+<div class="col-sm-12">
+    <div class="panel-group col-sm-12">
+        <div class="panel panel-default">
+            <div class="panel-heading">
+                <span>Terminal</span>
+                <span class="pull-right">
+                    <span ng-show="termConnected" class="label label-success"><i class="fa fa-circle"></i> Connected</span>
+                    <span ng-show="!termConnected" class="label label-danger"><i class="fa fa-circle"></i> Disconnected</span>
+                    <button class="btn btn-xs btn-default" ng-click="termReconnect()" ng-show="!termConnected" style="margin-left:5px">
+                        <i class="fa fa-refresh"></i> Reconnect
+                    </button>
+                    <button class="btn btn-xs btn-default" ng-click="termClear()" style="margin-left:5px">
+                        <i class="fa fa-eraser"></i> Clear
+                    </button>
+                    <select class="input-sm" ng-model="termFontSize" ng-change="termSetFontSize()" style="margin-left:5px;height:24px;padding:0 4px">
+                        <option value="12">S</option>
+                        <option value="14">M</option>
+                        <option value="16">L</option>
+                    </select>
+                </span>
+            </div>
+            <div class="panel-body" style="padding:0; background:#000;">
+                <div id="terminal-container" style="width:100%; height:calc(100vh - 180px); min-height:300px;"></div>
+            </div>
+            <div class="panel-footer" style="font-size:11px; color:#888;">
+                <span>Stratux WebUI Terminal</span>
+                <span class="pull-right">
+                    <span ng-show="termIdleWarning" class="text-warning">
+                        <i class="fa fa-clock-o"></i> Idle timeout in {{termIdleRemaining}}s
+                    </span>
+                    <button class="btn btn-xs btn-danger" ng-click="termClose()" style="margin-left:10px">
+                        <i class="fa fa-times"></i> Close Session
+                    </button>
+                </span>
+            </div>
+        </div>
+    </div>
+</div>

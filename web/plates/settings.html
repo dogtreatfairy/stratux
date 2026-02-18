@@ -344,6 +344,122 @@
     </div>
     <!-- End Right Col -->
 </div>
+
+<!-- SDR Management Section -->
+<div class="col-sm-12">
+    <!-- Region Profile Selector -->
+    <div class="panel-group col-sm-12">
+        <div class="panel panel-default">
+            <div class="panel-heading">SDR Management</div>
+            <div class="panel-body">
+                <!-- Profile Selector -->
+                <div class="form-group reset-flow">
+                    <label class="control-label col-xs-4">Region Profile</label>
+                    <div class="col-xs-8">
+                        <div class="btn-group" style="width:100%">
+                            <button class="btn" ng-class="{'btn-primary': sdrActiveProfile=='US', 'btn-default': sdrActiveProfile!='US'}"
+                                    ng-click="setSdrProfile('US')" style="width:33%">US</button>
+                            <button class="btn" ng-class="{'btn-primary': sdrActiveProfile=='EU', 'btn-default': sdrActiveProfile!='EU'}"
+                                    ng-click="setSdrProfile('EU')" style="width:33%">EU</button>
+                            <button class="btn" ng-class="{'btn-primary': sdrActiveProfile=='Custom', 'btn-default': sdrActiveProfile!='Custom'}"
+                                    ng-click="setSdrProfile('Custom')" style="width:34%">Custom</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="form-group reset-flow" ng-show="sdrActiveProfile=='US'">
+                    <div class="col-xs-12">
+                        <small class="text-muted">US profile: 978 MHz UAT + 1090 MHz ES enabled.</small>
+                    </div>
+                </div>
+                <div class="form-group reset-flow" ng-show="sdrActiveProfile=='EU'">
+                    <div class="col-xs-12">
+                        <small class="text-muted">EU profile: 868 MHz OGN + 1090 MHz ES enabled (Developer Mode on).</small>
+                    </div>
+                </div>
+                <div class="form-group reset-flow" ng-show="sdrActiveProfile=='Custom'">
+                    <div class="col-xs-12">
+                        <small class="text-muted">Custom profile: assign any protocol to any dongle below.</small>
+                    </div>
+                </div>
+
+                <!-- SDR Inventory Cards -->
+                <div ng-show="sdrDevices.length == 0" class="form-group reset-flow">
+                    <div class="col-xs-12">
+                        <div class="alert alert-warning" style="margin-top:10px">
+                            <i class="fa fa-exclamation-triangle"></i> No SDR dongles detected.
+                        </div>
+                    </div>
+                </div>
+
+                <div ng-repeat="sdr in sdrDevices" style="border:1px solid #ddd; border-radius:4px; padding:10px; margin-top:10px;">
+                    <div class="row">
+                        <div class="col-xs-6">
+                            <strong>SDR {{$index}}</strong>
+                            <span class="label" ng-class="{'label-success': sdr.state=='running', 'label-default': sdr.state=='stopped', 'label-danger': sdr.state=='error'}"
+                                  style="margin-left:5px">{{sdr.state}}</span>
+                        </div>
+                        <div class="col-xs-6 text-right">
+                            <small class="text-muted">{{sdr.serial}}</small>
+                            <span ng-show="!sdr.idSet" class="label label-warning" style="margin-left:5px">Anonymous</span>
+                        </div>
+                    </div>
+                    <div class="row" style="margin-top:8px">
+                        <div class="col-xs-4">
+                            <label class="control-label">Protocol</label>
+                            <!-- Custom profile: editable dropdown -->
+                            <select ng-show="sdrActiveProfile=='Custom'" class="form-control input-sm"
+                                    ng-model="sdr.customRole"
+                                    ng-change="updateCustomAssignment(sdr)">
+                                <option value="978">978 (UAT)</option>
+                                <option value="1090">1090 (ES)</option>
+                                <option value="868">868 (OGN)</option>
+                                <option value="162">162 (AIS)</option>
+                                <option value="disabled">Disabled</option>
+                            </select>
+                            <!-- US/EU profile: read-only display -->
+                            <div ng-hide="sdrActiveProfile=='Custom'">
+                                <span class="form-control-static" ng-switch="sdr.role">
+                                    <span ng-switch-when="978">978 (UAT)</span>
+                                    <span ng-switch-when="1090">1090 (ES)</span>
+                                    <span ng-switch-when="868">868 (OGN)</span>
+                                    <span ng-switch-when="162">162 (AIS)</span>
+                                    <span ng-switch-default><em>Unassigned</em></span>
+                                </span>
+                            </div>
+                        </div>
+                        <div class="col-xs-4">
+                            <label class="control-label">PPM</label>
+                            <div class="form-control-static">{{sdr.ppm}}</div>
+                        </div>
+                        <div class="col-xs-4">
+                            <label class="control-label">Gain</label>
+                            <div class="form-control-static">{{sdr.gain}}</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Custom Profile Apply Button -->
+                <div ng-show="sdrActiveProfile=='Custom'" class="form-group reset-flow" style="margin-top:15px">
+                    <div class="col-xs-12">
+                        <button class="btn btn-primary btn-block" ng-click="applyCustomProfile()">
+                            <i class="fa fa-check"></i> Apply Custom Profile
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Refresh Button -->
+                <div class="form-group reset-flow" style="margin-top:10px">
+                    <div class="col-xs-12">
+                        <button class="btn btn-default btn-block" ng-click="refreshSdrState()">
+                            <i class="fa fa-refresh"></i> Refresh SDR State
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Developer mode area -->
 <div ng-show="DeveloperMode" class="col-sm-12" >
     <!-- Begin Left Col -->

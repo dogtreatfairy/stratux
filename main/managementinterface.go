@@ -43,6 +43,13 @@ import (
 	"github.com/stratux/stratux/common"
 )
 
+// Terminal session management
+var (
+	terminalSessionCount int
+	terminalSessionMu    sync.Mutex
+	maxTerminalSessions  = 2
+)
+
 type SettingMessage struct {
 	Setting string `json:"setting"`
 	Value   bool   `json:"state"`
@@ -256,6 +263,172 @@ func handleSituationWS(conn *websocket.Conn) {
 
 }
 
+// handleTerminalWS provides an interactive shell session over WebSocket.
+// It spawns /bin/bash and relays stdin/stdout between the WebSocket and the process.
+func handleTerminalWS(conn *websocket.Conn) {
+	// Only allow terminal access in developer mode
+	if !globalSettings.DeveloperMode {
+		conn.Write([]byte(`{"type":"status","msg":"rejected","reason":"developer_mode_disabled"}`))
+		conn.Close()
+		return
+	}
+
+	// Check session limit
+	terminalSessionMu.Lock()
+	if terminalSessionCount >= maxTerminalSessions {
+		terminalSessionMu.Unlock()
+		statusMsg := `{"type":"status","msg":"rejected","reason":"max_sessions"}`
+		conn.Write([]byte(statusMsg))
+		conn.Close()
+		return
+	}
+	terminalSessionCount++
+	terminalSessionMu.Unlock()
+
+	defer func() {
+		terminalSessionMu.Lock()
+		terminalSessionCount--
+		terminalSessionMu.Unlock()
+	}()
+
+	// Send connected status
+	conn.Write([]byte(`{"type":"status","msg":"connected"}`))
+
+	// Spawn bash
+	cmd := exec.Command("/bin/bash", "-l")
+	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
+
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		log.Printf("handleTerminalWS: stdin pipe error: %s\n", err.Error())
+		conn.Write([]byte(`{"type":"status","msg":"error","reason":"stdin_pipe"}`))
+		return
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		log.Printf("handleTerminalWS: stdout pipe error: %s\n", err.Error())
+		conn.Write([]byte(`{"type":"status","msg":"error","reason":"stdout_pipe"}`))
+		return
+	}
+	cmd.Stderr = cmd.Stdout // Merge stderr into stdout
+
+	if err := cmd.Start(); err != nil {
+		log.Printf("handleTerminalWS: start error: %s\n", err.Error())
+		conn.Write([]byte(`{"type":"status","msg":"error","reason":"start_failed"}`))
+		return
+	}
+
+	log.Printf("Terminal session started (PID %d)\n", cmd.Process.Pid)
+
+	// Send banner
+	conn.Write([]byte("Stratux WebUI Terminal — Type 'exit' to close session\r\n"))
+
+	// Idle timeout tracking
+	idleTimer := time.NewTimer(15 * time.Minute)
+	idleWarningTimer := time.NewTimer(14 * time.Minute)
+	lastInput := time.Now()
+
+	done := make(chan struct{})
+
+	// Goroutine: read from bash stdout, send to WebSocket
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			n, err := stdout.Read(buf)
+			if n > 0 {
+				_, werr := conn.Write(buf[:n])
+				if werr != nil {
+					break
+				}
+			}
+			if err != nil {
+				break
+			}
+		}
+		close(done)
+	}()
+
+	// Goroutine: read from WebSocket, send to bash stdin
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			n, err := conn.Read(buf)
+			if err != nil {
+				// WebSocket closed
+				stdin.Close()
+				return
+			}
+			if n > 0 {
+				data := string(buf[:n])
+
+				// Check if it's a JSON control message
+				if len(data) > 0 && data[0] == '{' {
+					var msg map[string]interface{}
+					if json.Unmarshal(buf[:n], &msg) == nil {
+						if msgType, ok := msg["type"].(string); ok && msgType == "resize" {
+							// Resize is a no-op without PTY, but reset idle timer
+							lastInput = time.Now()
+							idleTimer.Reset(15 * time.Minute)
+							idleWarningTimer.Reset(14 * time.Minute)
+							continue
+						}
+					}
+				}
+
+				// Regular input - write to bash stdin
+				stdin.Write(buf[:n])
+
+				// Reset idle timers
+				lastInput = time.Now()
+				idleTimer.Reset(15 * time.Minute)
+				idleWarningTimer.Reset(14 * time.Minute)
+			}
+		}
+	}()
+
+	// Wait for completion or idle timeout
+	select {
+	case <-done:
+		// Process exited normally
+		exitCode := 0
+		if err := cmd.Wait(); err != nil {
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				exitCode = exitErr.ExitCode()
+			}
+		}
+		exitMsg := fmt.Sprintf(`{"type":"status","msg":"exited","code":%d}`, exitCode)
+		conn.Write([]byte(exitMsg))
+	case <-idleWarningTimer.C:
+		// Send idle warning
+		remaining := int((15*time.Minute - time.Since(lastInput)) / time.Second)
+		if remaining < 0 {
+			remaining = 60
+		}
+		warningMsg := fmt.Sprintf(`{"type":"status","msg":"idle_warning","remainingSec":%d}`, remaining)
+		conn.Write([]byte(warningMsg))
+		// Wait for actual timeout
+		select {
+		case <-done:
+			exitCode := 0
+			if err := cmd.Wait(); err != nil {
+				if exitErr, ok := err.(*exec.ExitError); ok {
+					exitCode = exitErr.ExitCode()
+				}
+			}
+			exitMsg := fmt.Sprintf(`{"type":"status","msg":"exited","code":%d}`, exitCode)
+			conn.Write([]byte(exitMsg))
+		case <-idleTimer.C:
+			conn.Write([]byte(`{"type":"status","msg":"idle_timeout"}`))
+			cmd.Process.Kill()
+			cmd.Wait()
+		}
+	}
+
+	conn.Close()
+	log.Printf("Terminal session ended (PID %d)\n", cmd.Process.Pid)
+	_ = lastInput // suppress unused warning
+}
+
 // AJAX call - /getStatus. Responds with current global status
 // a webservice call for the same data available on the websocket but when only a single update is needed
 func handleStatusRequest(w http.ResponseWriter, r *http.Request) {
@@ -333,6 +506,83 @@ func handleRegionGet(w http.ResponseWriter, r *http.Request) {
 		log.Printf("%s", err)
 	}
 	fmt.Fprintf(w, "%s\n", regionJSON)
+}
+
+// AJAX call - /getSdrState. Returns per-dongle SDR inventory, active profile, and stack state.
+func handleSdrStateRequest(w http.ResponseWriter, r *http.Request) {
+	setNoCache(w)
+	setJSONHeaders(w)
+	sdrJSON, err := getSdrInventoryJSON()
+	if err != nil {
+		log.Printf("Error marshalling SDR state: %s\n", err.Error())
+		http.Error(w, "Internal error", http.StatusInternalServerError)
+		return
+	}
+	fmt.Fprintf(w, "%s\n", sdrJSON)
+}
+
+// AJAX call - /getRegionProfiles. Returns all region profiles and active selection.
+func handleRegionProfilesRequest(w http.ResponseWriter, r *http.Request) {
+	setNoCache(w)
+	setJSONHeaders(w)
+	resp := getRegionProfilesResponse()
+	profilesJSON, err := json.Marshal(&resp)
+	if err != nil {
+		log.Printf("Error marshalling region profiles: %s\n", err.Error())
+		http.Error(w, "Internal error", http.StatusInternalServerError)
+		return
+	}
+	fmt.Fprintf(w, "%s\n", profilesJSON)
+}
+
+// AJAX call - /setRegionProfile. POST to switch active region profile.
+func handleRegionProfileSet(w http.ResponseWriter, r *http.Request) {
+	setNoCache(w)
+	setJSONHeaders(w)
+	w.Header().Set("Access-Control-Allow-Method", "GET, POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept")
+	if r.Method == "POST" {
+		decoder := json.NewDecoder(r.Body)
+		var msg struct {
+			Profile     string                  `json:"profile"`
+			Assignments map[string]string       `json:"assignments,omitempty"`
+			PPMOverrides map[string]int          `json:"ppmOverrides,omitempty"`
+		}
+		err := decoder.Decode(&msg)
+		if err != nil {
+			log.Printf("handleRegionProfileSet: decode error: %s\n", err.Error())
+			http.Error(w, "Bad request", http.StatusBadRequest)
+			return
+		}
+
+		// If Custom profile, save assignments
+		if msg.Profile == "Custom" && msg.Assignments != nil {
+			if globalSettings.SdrRegionProfiles == nil {
+				globalSettings.SdrRegionProfiles = make(map[string]SdrRegionProfile)
+			}
+			ppmOverrides := msg.PPMOverrides
+			if ppmOverrides == nil {
+				ppmOverrides = make(map[string]int)
+			}
+			globalSettings.SdrRegionProfiles["Custom"] = SdrRegionProfile{
+				Name:         "Custom",
+				Assignments:  msg.Assignments,
+				PPMOverrides: ppmOverrides,
+				Editable:     true,
+			}
+		}
+
+		err = applyRegionProfile(msg.Profile)
+		if err != nil {
+			log.Printf("handleRegionProfileSet: apply error: %s\n", err.Error())
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		resp := map[string]string{"status": "ok", "profile": msg.Profile}
+		respJSON, _ := json.Marshal(resp)
+		fmt.Fprintf(w, "%s\n", respJSON)
+	}
 }
 
 // AJAX call - /setRegion. receives via POST command, any/all stratux.conf data.
@@ -1287,6 +1537,13 @@ func managementInterface() {
 			s.ServeHTTP(w, req)
 		})
 
+	http.HandleFunc("/terminal",
+		func(w http.ResponseWriter, req *http.Request) {
+			s := websocket.Server{
+				Handler: websocket.Handler(handleTerminalWS)}
+			s.ServeHTTP(w, req)
+		})
+
 	http.HandleFunc("/getStatus", handleStatusRequest)
 	http.HandleFunc("/getSituation", handleSituationRequest)
 	http.HandleFunc("/getTowers", handleTowersRequest)
@@ -1314,6 +1571,11 @@ func managementInterface() {
 	http.HandleFunc("/downloaddb", handleDownloadDBRequest)
 	http.HandleFunc("/tiles/tilesets", handleTilesets)
 	http.HandleFunc("/tiles/", handleTile)
+
+	// SDR Management APIs
+	http.HandleFunc("/getSdrState", handleSdrStateRequest)
+	http.HandleFunc("/getRegionProfiles", handleRegionProfilesRequest)
+	http.HandleFunc("/setRegionProfile", handleRegionProfileSet)
 
 
 	addr := fmt.Sprintf(":%d", ManagementAddr)

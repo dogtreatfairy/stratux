@@ -11,6 +11,8 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
+	"fmt"
 	"log"
 	"os/exec"
 	"regexp"
@@ -24,6 +26,216 @@ import (
 	rtl "github.com/jpoirier/gortlsdr"
 	"github.com/stratux/stratux/godump978"
 )
+
+// SdrDeviceState represents the runtime state of a single SDR dongle, exposed via the API.
+type SdrDeviceState struct {
+	Index    int     `json:"index"`
+	Serial   string  `json:"serial"`
+	IdSet    bool    `json:"idSet"`
+	Role     string  `json:"role"`     // "978", "1090", "868", "162", "" (unassigned)
+	PPM      int     `json:"ppm"`
+	Gain     float64 `json:"gain"`
+	State    string  `json:"state"`    // "running", "stopped", "error"
+}
+
+// SdrInventory is returned by /getSdrState.
+type SdrInventory struct {
+	Devices       []SdrDeviceState `json:"devices"`
+	ActiveProfile string           `json:"activeProfile"` // "US", "EU", "Custom", ""
+	StackState    string           `json:"stackState"`    // "running", "stopped"
+}
+
+// getSdrInventory builds the current SDR device state from live runtime data.
+func getSdrInventory() SdrInventory {
+	inv := SdrInventory{
+		Devices:    make([]SdrDeviceState, 0),
+		StackState: "running",
+	}
+
+	// Determine active profile from RegionSelected
+	switch globalSettings.RegionSelected {
+	case 1:
+		inv.ActiveProfile = "US"
+	case 2:
+		inv.ActiveProfile = "EU"
+	case 3:
+		inv.ActiveProfile = "Custom"
+	default:
+		inv.ActiveProfile = ""
+	}
+
+	// Enumerate all connected RTL-SDR devices
+	count := rtl.GetDeviceCount()
+	if count > 3 {
+		count = 3
+	}
+
+	for i := 0; i < count; i++ {
+		_, _, s, err := rtl.GetDeviceUsbStrings(i)
+		if err != nil {
+			continue
+		}
+		s = strings.Trim(s, "\x00")
+
+		ds := SdrDeviceState{
+			Index:  i,
+			Serial: s,
+			IdSet:  rUAT.hasID(s) || rES.hasID(s) || rOGN.hasID(s) || rAIS.hasID(s),
+			State:  "stopped",
+		}
+
+		// Determine role and state from active device pointers
+		if UATDev != nil && UATDev.indexID == i {
+			ds.Role = "978"
+			ds.PPM = UATDev.ppm
+			ds.Gain = UATDev.gain
+			ds.State = "running"
+		} else if ESDev != nil && ESDev.indexID == i {
+			ds.Role = "1090"
+			ds.PPM = ESDev.ppm
+			ds.Gain = ESDev.gain
+			ds.State = "running"
+		} else if OGNDev != nil && OGNDev.indexID == i {
+			ds.Role = "868"
+			ds.PPM = OGNDev.ppm
+			ds.Gain = OGNDev.gain
+			ds.State = "running"
+		} else if AISDev != nil && AISDev.indexID == i {
+			ds.Role = "162"
+			ds.PPM = AISDev.ppm
+			ds.Gain = AISDev.gain
+			ds.State = "running"
+		}
+
+		inv.Devices = append(inv.Devices, ds)
+	}
+
+	return inv
+}
+
+// getSdrInventoryJSON returns the JSON-encoded SDR inventory for API responses.
+func getSdrInventoryJSON() ([]byte, error) {
+	inv := getSdrInventory()
+	return json.Marshal(&inv)
+}
+
+// SdrRegionProfile defines the SDR configuration for a region profile.
+type SdrRegionProfile struct {
+	Name        string            `json:"name"`
+	Assignments map[string]string `json:"assignments"` // serial -> role ("978","1090","868","162","disabled")
+	PPMOverrides map[string]int   `json:"ppmOverrides"` // serial -> ppm
+	Editable    bool              `json:"editable"`     // true for Custom, false for US/EU
+}
+
+// RegionProfilesResponse is returned by /getRegionProfiles.
+type RegionProfilesResponse struct {
+	Active   string                      `json:"active"`
+	Profiles map[string]SdrRegionProfile `json:"profiles"`
+}
+
+// getRegionProfilesResponse builds the profiles response. Built-in profiles derive
+// from default region rules; Custom profile comes from persisted settings.
+func getRegionProfilesResponse() RegionProfilesResponse {
+	resp := RegionProfilesResponse{
+		Profiles: make(map[string]SdrRegionProfile),
+	}
+
+	switch globalSettings.RegionSelected {
+	case 1:
+		resp.Active = "US"
+	case 2:
+		resp.Active = "EU"
+	case 3:
+		resp.Active = "Custom"
+	default:
+		resp.Active = ""
+	}
+
+	// US profile: default UAT + ES
+	resp.Profiles["US"] = SdrRegionProfile{
+		Name:        "US",
+		Assignments: map[string]string{},
+		PPMOverrides: map[string]int{},
+		Editable:    false,
+	}
+
+	// EU profile: default OGN + ES
+	resp.Profiles["EU"] = SdrRegionProfile{
+		Name:        "EU",
+		Assignments: map[string]string{},
+		PPMOverrides: map[string]int{},
+		Editable:    false,
+	}
+
+	// Custom profile from persisted settings
+	customAssignments := make(map[string]string)
+	customPPM := make(map[string]int)
+	if globalSettings.SdrRegionProfiles != nil {
+		if cp, ok := globalSettings.SdrRegionProfiles["Custom"]; ok {
+			customAssignments = cp.Assignments
+			customPPM = cp.PPMOverrides
+		}
+	}
+	resp.Profiles["Custom"] = SdrRegionProfile{
+		Name:         "Custom",
+		Assignments:  customAssignments,
+		PPMOverrides: customPPM,
+		Editable:     true,
+	}
+
+	return resp
+}
+
+// applyRegionProfile applies a profile name ("US", "EU", "Custom") to the live settings.
+func applyRegionProfile(profile string) error {
+	switch profile {
+	case "US":
+		globalSettings.RegionSelected = 1
+		globalSettings.UAT_Enabled = true
+		globalSettings.ES_Enabled = true
+		globalSettings.OGN_Enabled = false
+		globalSettings.AIS_Enabled = false
+		globalSettings.DeveloperMode = false
+	case "EU":
+		globalSettings.RegionSelected = 2
+		globalSettings.UAT_Enabled = false
+		globalSettings.ES_Enabled = true
+		globalSettings.OGN_Enabled = true
+		globalSettings.AIS_Enabled = false
+		globalSettings.DeveloperMode = true
+	case "Custom":
+		globalSettings.RegionSelected = 3
+		// For custom, derive protocol enablement from assignments
+		if globalSettings.SdrRegionProfiles != nil {
+			if cp, ok := globalSettings.SdrRegionProfiles["Custom"]; ok {
+				hasUAT := false
+				hasES := false
+				hasOGN := false
+				hasAIS := false
+				for _, role := range cp.Assignments {
+					switch role {
+					case "978":
+						hasUAT = true
+					case "1090":
+						hasES = true
+					case "868":
+						hasOGN = true
+					case "162":
+						hasAIS = true
+					}
+				}
+				globalSettings.UAT_Enabled = hasUAT
+				globalSettings.ES_Enabled = hasES
+				globalSettings.OGN_Enabled = hasOGN
+				globalSettings.AIS_Enabled = hasAIS
+			}
+		}
+	default:
+		return fmt.Errorf("unknown profile: %s", profile)
+	}
+	saveSettings()
+	return nil
+}
 
 // Device holds per dongle values and attributes
 type Device struct {

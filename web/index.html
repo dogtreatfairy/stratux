@@ -78,6 +78,7 @@
 	<script src="plates/js/map.js"></script>
 	<script src="plates/js/gps.js"></script>
 	<script src="plates/js/developer.js"></script>
+	<script src="plates/js/terminal.js"></script>
 </head>
 
 <body ng-app="stratux" ng-controller="MainCtrl" ui-prevent-touchmove-defaults>
@@ -105,6 +106,9 @@
 					<a class="list-group-item" href="#/map"><i class="fa fa-map"></i>    Map <i class="fa fa-chevron-right pull-right"></i></a>
 					<div ng-show="DeveloperMode">
 					<a class="list-group-item" href="#/developer"><i class="fa fa-tasks"></i>    Developer <i class="fa fa-chevron-right pull-right"></i></a>
+					</div>
+					<div ng-show="DeveloperMode">
+					<a class="list-group-item" href="#/terminal"><i class="fa fa-terminal"></i>    Terminal <i class="fa fa-chevron-right pull-right"></i></a>
 					</div>
 				</div>
 			</div>

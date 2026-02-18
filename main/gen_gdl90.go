@@ -1251,7 +1251,10 @@ type settings struct {
 	GpsManualDevice	     string         // default: /dev/ttyAMA0
     GpsManualChip        string         // ublox8, ublox9, ublox
 	GpsManualTargetBaud  int            // default: 115200
-	RegionSelected       int			// 0 - none, 1 = US, 2 = EU
+	RegionSelected       int			// 0 - none, 1 = US, 2 = EU, 3 = Custom
+
+	// SDR region profile assignments (keyed by profile name: "US", "EU", "Custom")
+	SdrRegionProfiles    map[string]SdrRegionProfile `json:"SdrRegionProfiles,omitempty"`
 }
 
 type status struct {
@@ -1704,7 +1707,7 @@ func main() {
 
 	// Set up status.
 	if stratuxVersion == "" {
-		stratuxVersion = "v0.0"
+		stratuxVersion = "v3.6.1"
 	}
 	globalStatus.Version = stratuxVersion
 
