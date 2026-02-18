@@ -142,6 +142,9 @@ See [app-vendor-integration.md](app-vendor-integration.md)
 # Development Environment setup
 If you want to get started working on the code, see [dev_setup.md](dev_setup.md)
 
+# SDR WebUI design
+If you are working on SDR role assignment/calibration from the web interface, see [sdr-webui-design.md](sdr-webui-design.md)
+
 # OTA upgrade process
 
 There are two mechanisms used for OTA updates in Stratux.
